@@ -6,6 +6,7 @@ using System.Text;
 using System.Collections.Concurrent;
 using System.Threading.Tasks;
 using System.IO;
+using System.Net;
 using System.Net.Security;
 using Titanium.Web.Proxy.Helpers;
 using System.Threading;
@@ -31,18 +32,32 @@ namespace Titanium.Web.Proxy.Network
         }
     }
 
-    internal class TcpConnectionManager
+    public interface ITcpConnectionManager
     {
-        static List<TcpConnection> ConnectionCache = new List<TcpConnection>();
+        TcpConnection GetClient(string Hostname, int port, bool IsSecure);
+        void ReleaseClient(TcpConnection Connection);
+        void ClearIdleConnections();
+        Func<string, IPAddress> ResolveHostNameCallback { get; set; }
+    }
 
-        public static TcpConnection GetClient(string Hostname, int port, bool IsSecure)
+    public class TcpConnectionManager : ITcpConnectionManager
+    {
+        List<TcpConnection> ConnectionCache = new List<TcpConnection>();
+
+        public Func<string,IPAddress> ResolveHostNameCallback { get; set; }
+
+        public TcpConnection GetClient(string Hostname, int port, bool IsSecure)
         {
             TcpConnection cached = null;
             while (true)
             {
                 lock (ConnectionCache)
                 {
-                    cached = ConnectionCache.FirstOrDefault(x => x.HostName == Hostname && x.port == port && x.IsSecure == IsSecure && x.TcpClient.Connected);
+                    cached =
+                        ConnectionCache.FirstOrDefault(
+                            x =>
+                                x.HostName == Hostname && x.port == port && x.IsSecure == IsSecure &&
+                                x.TcpClient.Connected);
 
                     if (cached != null)
                         ConnectionCache.Remove(cached);
@@ -58,7 +73,10 @@ namespace Titanium.Web.Proxy.Network
             if (cached == null)
                 cached = CreateClient(Hostname, port, IsSecure);
 
-            if (ConnectionCache.Where(x => x.HostName == Hostname && x.port == port && x.IsSecure == IsSecure && x.TcpClient.Connected).Count() < 2)
+            if (
+                ConnectionCache.Where(
+                    x => x.HostName == Hostname && x.port == port && x.IsSecure == IsSecure && x.TcpClient.Connected)
+                    .Count() < 2)
             {
                 Task.Factory.StartNew(() => ReleaseClient(CreateClient(Hostname, port, IsSecure)));
             }
@@ -66,19 +84,32 @@ namespace Titanium.Web.Proxy.Network
             return cached;
         }
 
-        private static TcpConnection CreateClient(string Hostname, int port, bool IsSecure)
+        public virtual IPAddress ResolveHostName(string hostname)
         {
-            var client = new TcpClient(Hostname, port);
-            var stream = (Stream)client.GetStream();
+            return ResolveHostNameCallback?.Invoke(hostname);
+        }
+
+        private TcpConnection CreateClient(string Hostname, int port, bool IsSecure)
+        {
+            IPAddress address = ResolveHostName(Hostname);
+            TcpClient client;
+            if (address != null)
+            {
+                client = new TcpClient(address.ToString(),port);
+            }
+            else
+                client = new TcpClient(Hostname, port);
+
+            var stream = (Stream) client.GetStream();
 
             if (IsSecure)
             {
-                var sslStream = (SslStream)null;
+                var sslStream = (SslStream) null;
                 try
                 {
                     sslStream = new SslStream(stream);
-                    sslStream.AuthenticateAsClient(Hostname, null, ProxyServer.SupportedProtocols , false);
-                    stream = (Stream)sslStream;
+                    sslStream.AuthenticateAsClient(Hostname, null, ProxyServer.SupportedProtocols, false);
+                    stream = (Stream) sslStream;
                 }
                 catch
                 {
@@ -99,13 +130,13 @@ namespace Titanium.Web.Proxy.Network
             };
         }
 
-        public static void ReleaseClient(TcpConnection Connection)
+        public void ReleaseClient(TcpConnection Connection)
         {
             Connection.LastAccess = DateTime.Now;
             ConnectionCache.Add(Connection);
         }
 
-        public static void ClearIdleConnections()
+        public void ClearIdleConnections()
         {
             while (true)
             {
@@ -114,14 +145,14 @@ namespace Titanium.Web.Proxy.Network
                     var cutOff = DateTime.Now.AddSeconds(-60);
 
                     ConnectionCache
-                       .Where(x => x.LastAccess < cutOff)
-                       .ToList()
-                       .ForEach(x => x.TcpClient.Close());
+                        .Where(x => x.LastAccess < cutOff)
+                        .ToList()
+                        .ForEach(x => x.TcpClient.Close());
 
                     ConnectionCache.RemoveAll(x => x.LastAccess < cutOff);
                 }
 
-                Thread.Sleep(1000 * 60 * 3);
+                Thread.Sleep(1000*60*3);
             }
 
         }

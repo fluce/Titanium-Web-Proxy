@@ -2,12 +2,22 @@
 using System.IO;
 using System.Diagnostics;
 using System.Collections.Generic;
+using System.Net;
+using System.Net.Sockets;
 using System.Security.Cryptography.X509Certificates;
 using System.Reflection;
+using System.Text;
+using Org.BouncyCastle.Asn1.Pkcs;
 
 namespace Titanium.Web.Proxy.Helpers
 {
-    public class CertificateManager : IDisposable 
+    public interface ICertificateManager: IDisposable
+    {
+        X509Certificate2 CreateCertificate(string certificateName);
+        bool CreateRootCertificate();
+    }
+
+    public class CertificateManager : IDisposable, ICertificateManager
     {
         private const string CertCreateFormat =
             "-ss {0} -n \"CN={1}, O={2}\" -sky {3} -cy {4} -m 120 -a sha256 -eku 1.3.6.1.5.5.7.3.1 {5}";
@@ -35,7 +45,7 @@ namespace Titanium.Web.Proxy.Helpers
         /// Attempts to move a self-signed certificate to the root store.
         /// </summary>
         /// <returns>true if succeeded, else false</returns>
-        public bool CreateTrustedRootCertificate()
+        public bool CreateRootCertificate()
         {
             X509Certificate2 rootCertificate =
                 CreateCertificate(RootStore, RootCertificateName);

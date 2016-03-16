@@ -22,7 +22,7 @@ namespace Titanium.Web.Proxy
     partial class ProxyServer
     {
         //This is called when client is aware of proxy
-        private static void HandleClient(ExplicitProxyEndPoint endPoint, TcpClient client)
+        private void HandleClient(ExplicitProxyEndPoint endPoint, TcpClient client)
         {
             Stream clientStream = client.GetStream();
             var clientStreamReader = new CustomBinaryReader(clientStream, Encoding.ASCII);
@@ -119,7 +119,7 @@ namespace Titanium.Web.Proxy
 
         //This is called when requests are routed through router to this endpoint
         //For ssl requests
-        private static void HandleClient(TransparentProxyEndPoint endPoint, TcpClient tcpClient)
+        private void HandleClient(TransparentProxyEndPoint endPoint, TcpClient tcpClient)
         {
             Stream clientStream = tcpClient.GetStream();
             CustomBinaryReader clientStreamReader = null;
@@ -128,20 +128,67 @@ namespace Titanium.Web.Proxy
 
             if (endPoint.EnableSsl)
             {
-                var sslStream = new SslStream(clientStream, true);
+                var buf = new byte[1024];
+                var l = clientStream.Read(buf, 0, 1024);
+                string server_name = null;
+                int idx = 0;
+                if (buf[idx++] == 0x16)
+                {
+                    System.Diagnostics.Debug.WriteLine("CLIENT HELLO : "+BitConverter.ToString(buf,0,l));
+                    idx += 2; // skip version
+                    int recLength = buf[idx + 1] | (buf[idx] << 8); idx += 2;
+                    var handshaketype = buf[idx++];
+                    if (handshaketype == 1)
+                    {
+                        idx += 3; // skip Length
+                        idx += 2; // skip version
+                        idx += 4; // skip time
+                        idx += 28; // skip random bytes
+                        byte sessionIdLength = buf[idx++];
+                        idx += sessionIdLength; // skip SessionId
+                        int cipherSuiteLength = buf[idx+1] | buf[idx] << 8; idx += 2;
+                        idx += cipherSuiteLength; // skip CipherSuite
+                        byte compressionLength = buf[idx++];
+                        idx += compressionLength; // skip Compression
+                        int extensionLength = buf[idx + 1] | buf[idx] << 8; idx += 2;
+                        while (extensionLength > 0)
+                        {
+                            int type = buf[idx + 1] | buf[idx] << 8; idx += 2; extensionLength -= 2;
+                            int length = buf[idx + 1] | buf[idx] << 8; idx += 2; extensionLength -= 2;
+                            if (type == 0) // ServerName
+                            {
+                                var idx2 = idx;
+                                int SNI_list_length = buf[idx2 + 1] | buf[idx2] << 8; idx2 += 2;
+                                byte SNI_type = buf[idx2++];
+                                if (SNI_type == 0)
+                                {
+                                    int SNI_length = buf[idx2 + 1] | buf[idx2] << 8; idx2 += 2;
+                                    server_name = Encoding.ASCII.GetString(buf, idx2, SNI_length);
+                                    break;
+                                }
+
+                            }
+                            idx += length;
+                            extensionLength -= length;
+                        }
+                    }
+
+                }
+
+                var sslStream = new SslStream(new CombinedStream(new MemoryStream(buf,0,l),clientStream), true);
                 //if(endPoint.UseServerNameIndication)
                 //{
                 //   //implement in future once SNI supported by SSL stream
                 //    certificate = CertManager.CreateCertificate(endPoint.GenericCertificateName);
                 //}
                 //else
-                certificate = CertManager.CreateCertificate(endPoint.GenericCertificateName);
+                certificate = CertManager.CreateCertificate(server_name??endPoint.GenericCertificateName);
 
                 try
                 {
                     //Successfully managed to authenticate the client using the fake certificate
                     sslStream.AuthenticateAsServer(certificate, false,
-                       SslProtocols.Tls, false);
+                       SupportedProtocols, false);
 
                     clientStreamReader = new CustomBinaryReader(sslStream, Encoding.ASCII);
                     clientStreamWriter = new StreamWriter(sslStream);
@@ -170,7 +217,7 @@ namespace Titanium.Web.Proxy
                 true);
         }
 
-        private static void HandleHttpSessionRequest(TcpClient client, string httpCmd, Stream clientStream,
+        private void HandleHttpSessionRequest(TcpClient client, string httpCmd, Stream clientStream,
             CustomBinaryReader clientStreamReader, StreamWriter clientStreamWriter, bool IsHttps)
         {
             TcpConnection connection = null;

@@ -9,17 +9,20 @@ namespace Titanium.Web.Proxy.Test
 {
     public class ProxyTestController
     {
-
+        public readonly ProxyServer ProxyServer=new ProxyServer();
 
         public void StartProxy()
         {
             ProxyServer.BeforeRequest += OnRequest;
             ProxyServer.BeforeResponse += OnResponse;
+            /*ProxyServer.TcpConnectionManager.ResolveHostNameCallback =
+                x => ("secure.fnac.com".Equals(x)) ? IPAddress.Parse("195.42.251.52") : null;*/
+
 
             //Exclude Https addresses you don't want to proxy
             //Usefull for clients that use certificate pinning
             //for example dropbox.com
-            var explicitEndPoint = new ExplicitProxyEndPoint(IPAddress.Any, 8000, true){
+            var explicitEndPoint = new ExplicitProxyEndPoint(IPAddress.Any, 8001, true){
                 ExcludedHttpsHostNameRegex = new List<string>() { "dropbox.com" }
             };
 
@@ -36,10 +39,10 @@ namespace Titanium.Web.Proxy.Test
             //In this example only google.com will work for HTTPS requests
             //Other sites will receive a certificate mismatch warning on browser
             //Please read about it before asking questions!
-            var transparentEndPoint = new TransparentProxyEndPoint(IPAddress.Any, 8001, true) { 
-                GenericCertificateName = "google.com"
+            var transparentEndPoint = new TransparentProxyEndPoint(IPAddress.Parse("127.0.0.253"), 443, true) { 
+                //GenericCertificateName = "secure.fnac.com"
             };         
-            ProxyServer.AddEndPoint(transparentEndPoint);
+            //ProxyServer.AddEndPoint(transparentEndPoint);
           
 
             foreach (var endPoint in ProxyServer.ProxyEndPoints)
@@ -47,7 +50,7 @@ namespace Titanium.Web.Proxy.Test
                     endPoint.GetType().Name, endPoint.IpAddress, endPoint.Port);
 
             //You can also add/remove end points after proxy has been started
-            ProxyServer.RemoveEndPoint(transparentEndPoint);
+            //ProxyServer.RemoveEndPoint(transparentEndPoint);
 
             //Only explicit proxies can be set as system proxy!
             ProxyServer.SetAsSystemHttpProxy(explicitEndPoint);
@@ -60,6 +63,8 @@ namespace Titanium.Web.Proxy.Test
             ProxyServer.BeforeResponse -= OnResponse;
 
             ProxyServer.Stop();
+
+            ProxyServer.DisableAllSystemProxies();
         }
 
         //Test On Request, intecept requests

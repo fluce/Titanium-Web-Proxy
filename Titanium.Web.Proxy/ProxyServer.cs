@@ -41,33 +41,35 @@ namespace Titanium.Web.Proxy
         internal static SslProtocols SupportedProtocols  = SslProtocols.Tls | SslProtocols.Ssl3;
 #endif
 
-        static ProxyServer()
+        public ProxyServer()
         {
             
             ProxyEndPoints = new List<ProxyEndPoint>();
+            TcpConnectionManager = new TcpConnectionManager();
 
             Initialize();
         }
 
-        private static CertificateManager CertManager { get; set; }
-        private static bool EnableSsl { get; set; }
-        private static bool certTrusted { get; set; }
-        private static bool proxyRunning { get; set; }
+        private ICertificateManager CertManager { get; set; }
+        public ITcpConnectionManager TcpConnectionManager { get; set; }
+        private bool EnableSsl { get; set; }
+        private bool certTrusted { get; set; }
+        private bool proxyRunning { get; set; }
 
-        public static string RootCertificateIssuerName { get; set; }
-        public static string RootCertificateName { get; set; }
+        public string RootCertificateIssuerName { get; set; }
+        public string RootCertificateName { get; set; }
 
-        public static event EventHandler<SessionEventArgs> BeforeRequest;
-        public static event EventHandler<SessionEventArgs> BeforeResponse;
+        public event EventHandler<SessionEventArgs> BeforeRequest;
+        public event EventHandler<SessionEventArgs> BeforeResponse;
 
-        public static List<ProxyEndPoint> ProxyEndPoints { get; set; }
+        public List<ProxyEndPoint> ProxyEndPoints { get; set; }
 
-        public static void Initialize()
+        public void Initialize()
         {
             Task.Factory.StartNew(() => TcpConnectionManager.ClearIdleConnections());
         }
 
-        public static void AddEndPoint(ProxyEndPoint endPoint)
+        public void AddEndPoint(ProxyEndPoint endPoint)
         {
             ProxyEndPoints.Add(endPoint);
 
@@ -75,7 +77,7 @@ namespace Titanium.Web.Proxy
                 Listen(endPoint);
         }
 
-        public static void RemoveEndPoint(ProxyEndPoint endPoint)
+        public void RemoveEndPoint(ProxyEndPoint endPoint)
         {
 
             if (ProxyEndPoints.Contains(endPoint) == false)
@@ -88,7 +90,7 @@ namespace Titanium.Web.Proxy
         }
 
 
-        public static void SetAsSystemHttpProxy(ExplicitProxyEndPoint endPoint)
+        public void SetAsSystemHttpProxy(ExplicitProxyEndPoint endPoint)
         {
             VerifyProxy(endPoint);
 
@@ -111,7 +113,7 @@ namespace Titanium.Web.Proxy
             SystemProxyHelper.RemoveHttpProxy();
         }
 
-        public static void SetAsSystemHttpsProxy(ExplicitProxyEndPoint endPoint)
+        public void SetAsSystemHttpsProxy(ExplicitProxyEndPoint endPoint)
         {
             VerifyProxy(endPoint);
 
@@ -150,7 +152,7 @@ namespace Titanium.Web.Proxy
             SystemProxyHelper.DisableAllProxy();
         }
 
-        public static void Start()
+        public void Start()
         {
             if (proxyRunning)
                 throw new Exception("Proxy is already running.");
@@ -158,13 +160,13 @@ namespace Titanium.Web.Proxy
             RootCertificateName = RootCertificateName ?? "Titanium Root Certificate Authority";
             RootCertificateIssuerName = RootCertificateIssuerName ?? "Titanium";
 
-            CertManager = new CertificateManager(RootCertificateIssuerName,
-                RootCertificateName);
+            CertManager = new BouncyCastleCertificateManager(RootCertificateIssuerName,
+                RootCertificateName, true);
 
             EnableSsl = ProxyEndPoints.Any(x => x.EnableSsl);
 
             if (EnableSsl)
-                certTrusted = CertManager.CreateTrustedRootCertificate();
+                certTrusted = CertManager.CreateRootCertificate();
 
             foreach (var endPoint in ProxyEndPoints)
             {
@@ -174,7 +176,7 @@ namespace Titanium.Web.Proxy
             proxyRunning = true;
         }
 
-        public static void Stop()
+        public void Stop()
         {
             if (!proxyRunning)
                 throw new Exception("Proxy is not running.");
@@ -199,7 +201,7 @@ namespace Titanium.Web.Proxy
             proxyRunning = false;
         }
 
-        private static void Listen(ProxyEndPoint endPoint)
+        private  void Listen(ProxyEndPoint endPoint)
         {
             endPoint.listener = new TcpListener(endPoint.IpAddress, endPoint.Port);
             endPoint.listener.Start();
@@ -215,7 +217,7 @@ namespace Titanium.Web.Proxy
         }
 
 
-        private static void VerifyProxy(ExplicitProxyEndPoint endPoint)
+        private void VerifyProxy(ExplicitProxyEndPoint endPoint)
         {
             if (ProxyEndPoints.Contains(endPoint) == false)
                 throw new Exception("Cannot set endPoints not added to proxy as system proxy");
@@ -224,10 +226,10 @@ namespace Titanium.Web.Proxy
                 throw new Exception("Cannot set system proxy settings before proxy has been started.");
         }
 
-        private static void OnAcceptConnection(IAsyncResult asyn)
+        private void OnAcceptConnection(IAsyncResult asyn)
         {
             var endPoint = (ProxyEndPoint)asyn.AsyncState;
-         
+
             try
             {
                 var client = endPoint.listener.EndAcceptTcpClient(asyn);
